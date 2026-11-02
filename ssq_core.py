@@ -4,6 +4,7 @@ import itertools
 import json
 import os
 import sys
+import urllib.parse
 
 
 def resource_path(rel):
@@ -27,40 +28,61 @@ CREAM = "#FFF8E7"
 BLUE_BALL = "#1E5AA8"
 
 
+def _parse_cwl_json(text):
+    data = json.loads(text)
+    if data.get("state") != 0:
+        raise Exception(data.get("message", "未知错误"))
+    results = []
+    for item in data.get("result", []):
+        red_balls = sorted(int(x) for x in item["red"].split(","))
+        blue_ball = int(item["blue"])
+        results.append({
+            "issue": item["code"],
+            "date": item["date"],
+            "red": red_balls,
+            "blue": blue_ball,
+        })
+    return results
+
+
 def fetch_lottery_data(count=50):
-    api_url = "https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice"
-    params = {"name": "ssq", "issueCount": str(count)}
+    api_path = "/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount={}".format(count)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/",
         "Accept": "application/json, text/plain, */*",
     }
-    try:
-        resp = requests.get(api_url, params=params, headers=headers, timeout=15)
-        resp.encoding = "utf-8"
-        data = resp.json()
-        if data.get("state") != 0:
-            raise Exception(data.get("message", "未知错误"))
-        results = []
-        for item in data.get("result", []):
-            red_balls = sorted(int(x) for x in item["red"].split(","))
-            blue_ball = int(item["blue"])
-            results.append({
-                "issue": item["code"],
-                "date": item["date"],
-                "red": red_balls,
-                "blue": blue_ball,
-            })
-        if results:
-            save_cache(results)
-        return results
-    except Exception as e:
-        print(f"网络请求失败: {e}")
-        cached = load_cache()
-        if cached:
-            print("使用本地缓存数据")
-            return cached[:count]
-        return []
+
+    url_list = [
+        ("direct", "https://www.cwl.gov.cn" + api_path, None),
+        ("allorigins", "https://api.allorigins.win/raw?url=" + urllib.parse.quote("https://www.cwl.gov.cn" + api_path, safe=""), None),
+        ("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + urllib.parse.quote("https://www.cwl.gov.cn" + api_path, safe=""), None),
+        ("thingproxy", "https://thingproxy.freeboard.io/fetch/" + "https://www.cwl.gov.cn" + api_path, None),
+        ("direct-http", "http://www.cwl.gov.cn" + api_path, None),
+    ]
+
+    for name, url, _ in url_list:
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = "utf-8"
+            text = resp.text.strip()
+            if not text.startswith("{"):
+                continue
+            results = _parse_cwl_json(text)
+            if results:
+                print(f"fetch 成功 [{name}], {len(results)} 期")
+                save_cache(results)
+                return results
+        except Exception as e:
+            print(f"fetch [{name}] 失败: {e}")
+            continue
+
+    print("所有网络源均失败，尝试本地缓存")
+    cached = load_cache()
+    if cached:
+        print("使用本地缓存数据")
+        return cached[:count]
+    return []
 
 
 def save_cache(data):
