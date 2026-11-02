@@ -1,0 +1,53 @@
+name: Fetch SSQ Data
+
+on:
+  schedule:
+    - cron: "30 12 * * 3,6,1"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch data from cwl.gov.cn
+        run: |
+          import json, urllib.request, ssl
+          ctx = ssl.create_default_context()
+          url = "https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=100"
+          req = urllib.request.Request(url, headers={
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": "https://www.cwl.gov.cn/",
+          })
+          with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+              data = json.loads(r.read().decode("utf-8"))
+          results = []
+          for item in data.get("result", []):
+              results.append({
+                  "issue": item["code"],
+                  "date": item["date"],
+                  "red": sorted(int(x) for x in item["red"].split(",")),
+                  "blue": int(item["blue"]),
+              })
+          with open("data/ssq.json", "w", encoding="utf-8") as f:
+              json.dump(results, f, ensure_ascii=False, indent=2)
+          print(f"Saved {len(results)} records")
+        shell: python
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ssq.json
+          if git diff --staged --quiet; then
+              echo "No changes"
+          else
+              git commit -m "chore: update ssq data $(date +%Y%m%d)"
+              git push
+          fi
