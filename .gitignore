@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.exe
+*.spec
+ssq_cache.json
+debug.log
+.venv/
+venv/
+.env
