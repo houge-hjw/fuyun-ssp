@@ -16,17 +16,49 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Fetch data from cwl.gov.cn
+      - name: Fetch lottery data (multi-source fallback)
         run: |
-          import json, urllib.request, ssl
-          ctx = ssl.create_default_context()
-          url = "https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=100"
-          req = urllib.request.Request(url, headers={
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-              "Referer": "https://www.cwl.gov.cn/",
-          })
-          with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
-              data = json.loads(r.read().decode("utf-8"))
+          import json, urllib.request, urllib.parse, ssl, sys, time
+
+          TARGET = "https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=100"
+          UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.cwl.gov.cn/"}
+
+          SOURCES = [
+              ("direct", TARGET),
+              ("allorigins", "https://api.allorigins.win/get?url=" + urllib.parse.quote(TARGET, safe="")),
+              ("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + urllib.parse.quote(TARGET, safe="")),
+              ("thingproxy", "https://thingproxy.freeboard.io/fetch/" + TARGET),
+              ("http-direct", TARGET.replace("https://", "http://")),
+          ]
+
+          def try_fetch(name, url):
+              try:
+                  ctx = ssl.create_default_context() if url.startswith("https") else ssl._create_unverified_context()
+                  req = urllib.request.Request(url, headers=UA)
+                  with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
+                      raw = r.read().decode("utf-8", errors="ignore")
+                  if name == "allorigins":
+                      j = json.loads(raw)
+                      raw = j.get("contents", j.get("data", ""))
+                  return json.loads(raw)
+              except Exception as e:
+                  print(f"  [{name}] FAILED: {e}")
+                  return None
+
+          data = None
+          for name, url in SOURCES:
+              print(f"Trying [{name}] ...")
+              data = try_fetch(name, url)
+              if data:
+                  print(f"  [{name}] SUCCESS!")
+                  break
+              time.sleep(1)
+
+          if not data:
+              print("All sources failed, keeping existing data")
+              sys.exit(0)
+
           results = []
           for item in data.get("result", []):
               results.append({
@@ -35,9 +67,14 @@ jobs:
                   "red": sorted(int(x) for x in item["red"].split(",")),
                   "blue": int(item["blue"]),
               })
+
+          if not results:
+              print("Empty result, keeping existing data")
+              sys.exit(0)
+
           with open("data/ssq.json", "w", encoding="utf-8") as f:
               json.dump(results, f, ensure_ascii=False, indent=2)
-          print(f"Saved {len(results)} records")
+          print(f"Saved {len(results)} records, latest: {results[0]['issue']}")
         shell: python
 
       - name: Commit & push
