@@ -45,25 +45,43 @@ def _parse_cwl_json(text):
     return results
 
 
+GITHUB_RAW = "https://raw.githubusercontent.com/houge-hjw/fuyun-ssp/main/data/ssq.json"
+
+
 def fetch_lottery_data(count=50):
-    api_path = "/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount={}".format(count)
     headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    }
+
+    try:
+        resp = requests.get(GITHUB_RAW, headers=headers, timeout=15)
+        resp.encoding = "utf-8"
+        results = resp.json()
+        if isinstance(results, list) and len(results) > 0:
+            print(f"fetch 成功 [github-raw], {len(results)} 期")
+            save_cache(results)
+            return results[:count]
+    except Exception as e:
+        print(f"github-raw 失败: {e}")
+
+    api_path = "/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount={}".format(count)
+    cwl_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/",
         "Accept": "application/json, text/plain, */*",
     }
 
     url_list = [
-        ("direct", "https://www.cwl.gov.cn" + api_path, None),
-        ("allorigins", "https://api.allorigins.win/raw?url=" + urllib.parse.quote("https://www.cwl.gov.cn" + api_path, safe=""), None),
-        ("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + urllib.parse.quote("https://www.cwl.gov.cn" + api_path, safe=""), None),
-        ("thingproxy", "https://thingproxy.freeboard.io/fetch/" + "https://www.cwl.gov.cn" + api_path, None),
-        ("direct-http", "http://www.cwl.gov.cn" + api_path, None),
+        ("direct", "https://www.cwl.gov.cn" + api_path),
+        ("allorigins", "https://api.allorigins.win/raw?url=" + urllib.parse.quote("https://www.cwl.gov.cn" + api_path, safe="")),
+        ("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + urllib.parse.quote("https://www.cwl.gov.cn" + api_path, safe="")),
+        ("direct-http", "http://www.cwl.gov.cn" + api_path),
     ]
 
-    for name, url, _ in url_list:
+    for name, url in url_list:
         try:
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.get(url, headers=cwl_headers, timeout=10)
             resp.encoding = "utf-8"
             text = resp.text.strip()
             if not text.startswith("{"):
